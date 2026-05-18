@@ -15,23 +15,27 @@
     "router_max_keywords": 12,
     "topic_partitioning": true,
     "crag": true,
-    "crag_min_correct_score": 0.36,
-    "crag_min_ambiguous_score": 0.28,
-    "crag_min_sentence_score": 0.24,
-    "crag_top_sentences": 8,
+    "crag_pipeline": "official_adapted_topic_partition_fullwiki_fallback",
+    "evaluator_path": null,
+    "evaluator_type": "embedding_fallback",
+    "upper_threshold": 0.6,
+    "lower_threshold": 0.45,
+    "decompose_mode": "selection",
+    "internal_top_n": 3,
+    "external_top_n": 5,
     "model_name": "gemma2:2b",
     "embedding_model": "all-MiniLM-L6-v2"
   },
   "metrics": {
-    "EM": 0.10614449696151249,
-    "Acc": 0.137474679270763,
-    "F1": 0.13503143610005972,
-    "G-Sem": 0.3231392661815762,
-    "Token": 1.2965563808237677
+    "EM": 0.1986495611073599,
+    "Acc": 0.26198514517218097,
+    "F1": 0.2588919103207941,
+    "G-Sem": 0.45945948835551625,
+    "Token": 1.550979068197164
   },
   "crag": {
-    "correct": 6520,
-    "ambiguous": 684,
-    "incorrect": 201
+    "correct": 1735,
+    "ambiguous": 3346,
+    "incorrect": 2324
   }
 }

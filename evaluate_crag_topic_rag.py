@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from crag_topic_rag.crag import evaluate_retrieval, refine_chunks
+from crag_topic_rag.crag import combine_ambiguous_knowledge, evaluate_retrieval, load_t5_retrieval_evaluator, prepare_knowledge
 from crag_topic_rag.topic_router import SemanticTopicRouter, extract_knowledge_points, load_topic_profiles
 from naive_rag.index_io import l2_normalize_vector, load_json, read_jsonl
 from naive_rag.llm_client import call_chat_completion, load_default_env_files, resolve_llm_settings
@@ -34,10 +34,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--router-max-knowledge-points", type=int, default=6)
     parser.add_argument("--router-max-keywords", type=int, default=12)
     parser.add_argument("--include-outlier-topic", action="store_true")
-    parser.add_argument("--min-correct-score", type=float, default=0.36)
-    parser.add_argument("--min-ambiguous-score", type=float, default=0.28)
-    parser.add_argument("--min-sentence-score", type=float, default=0.24)
-    parser.add_argument("--top-sentences", type=int, default=8)
+    parser.add_argument("--evaluator-path", help="Optional CRAG T5 retrieval evaluator path. If omitted, embedding scores use the same CRAG flag process.")
+    parser.add_argument("--evaluator-device")
+    parser.add_argument("--upper-threshold", type=float, default=0.60, help="CRAG score threshold for a relevant/correct passage flag.")
+    parser.add_argument("--lower-threshold", type=float, default=0.45, help="CRAG score threshold for an ambiguous passage flag.")
+    parser.add_argument("--decompose-mode", choices=["selection", "excerption", "fixed_num"], default="selection")
+    parser.add_argument("--internal-top-n", type=int, default=3)
+    parser.add_argument("--external-top-n", type=int, default=5)
     parser.add_argument("--device")
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--base-url")
@@ -208,7 +211,9 @@ def compact_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "title": item.get("title"),
             "chunk_id": item.get("chunk_id"),
             "source_rank": item.get("source_rank"),
+            "strip_index": item.get("strip_index"),
             "crag_sentence_score": item.get("crag_sentence_score"),
+            "knowledge_source": item.get("knowledge_source"),
         }
         for item in chunks
     ]
@@ -296,6 +301,9 @@ def main() -> int:
         raise ValueError("The CRAG topic index has no topic_id assignments. Run build_crag_topic_index.py first.")
 
     embedding_model = SentenceTransformer(manifest["embedding_model"], device=args.device)
+    retrieval_evaluator = None
+    if args.evaluator_path:
+        retrieval_evaluator = load_t5_retrieval_evaluator(args.evaluator_path, args.evaluator_device or args.device)
     router = SemanticTopicRouter(topic_profiles, embedding_model, args.router_top_topics)
     examples = load_examples(args.data_file)
     end = len(examples) if args.limit is None else min(len(examples), args.start + args.limit)
@@ -318,10 +326,14 @@ def main() -> int:
         "router_max_keywords": args.router_max_keywords,
         "topic_partitioning": True,
         "crag": True,
-        "crag_min_correct_score": args.min_correct_score,
-        "crag_min_ambiguous_score": args.min_ambiguous_score,
-        "crag_min_sentence_score": args.min_sentence_score,
-        "crag_top_sentences": args.top_sentences,
+        "crag_pipeline": "official_adapted_topic_partition_fullwiki_fallback",
+        "evaluator_path": args.evaluator_path,
+        "evaluator_type": "t5" if args.evaluator_path else "embedding_fallback",
+        "upper_threshold": args.upper_threshold,
+        "lower_threshold": args.lower_threshold,
+        "decompose_mode": args.decompose_mode,
+        "internal_top_n": args.internal_top_n,
+        "external_top_n": args.external_top_n,
         "model_name": model_name,
         "embedding_model": manifest["embedding_model"],
     }
@@ -350,28 +362,53 @@ def main() -> int:
             query_embedding = l2_normalize_vector(np.asarray(query_embedding, dtype=np.float32))
 
             topic_chunks = retrieve_from_topics(query_embedding, chunks, embeddings, topic_index, selected_topic_ids, args.top_k)
-            crag_eval = evaluate_retrieval(query_embedding, topic_chunks, embedding_model, args.min_correct_score, args.min_ambiguous_score)
-            crag_state = crag_eval["state"]
-            corrective_chunks = []
-            if crag_state in {"ambiguous", "incorrect"}:
-                corrective_chunks = retrieve_full(query_embedding, chunks, embeddings, args.fallback_top_k)
-            combined = topic_chunks + corrective_chunks
-            seen = set()
-            deduped = []
-            for chunk in combined:
-                key = chunk.get("chunk_id") or (chunk.get("article_id"), chunk.get("rank"), chunk.get("text"))
-                if key in seen:
-                    continue
-                seen.add(key)
-                deduped.append(chunk)
-            refined_chunks, refined_evidence = refine_chunks(
+            crag_eval = evaluate_retrieval(
+                question,
                 query_embedding,
-                deduped,
+                topic_chunks,
                 embedding_model,
-                top_sentences=args.top_sentences,
-                min_sentence_score=args.min_sentence_score,
+                upper_threshold=args.upper_threshold,
+                lower_threshold=args.lower_threshold,
+                evaluator=retrieval_evaluator,
             )
-            prompt = build_prompt(question, refined_chunks)
+            crag_state = crag_eval["state"]
+
+            internal_chunks, internal_evidence = prepare_knowledge(
+                question,
+                query_embedding,
+                topic_chunks,
+                embedding_model,
+                decompose_mode=args.decompose_mode,
+                top_n=args.internal_top_n,
+                evaluator=retrieval_evaluator,
+                knowledge_source="internal",
+            )
+            external_chunks = []
+            external_knowledge_chunks = []
+            external_evidence = []
+            if crag_state in {"ambiguous", "incorrect"}:
+                # CRAG uses web search for this branch. For HotpotQA we adapt it to
+                # query the larger fullwiki index instead, preserving the branch logic.
+                external_chunks = retrieve_full(query_embedding, chunks, embeddings, args.fallback_top_k)
+                external_knowledge_chunks, external_evidence = prepare_knowledge(
+                    question,
+                    query_embedding,
+                    external_chunks,
+                    embedding_model,
+                    decompose_mode=args.decompose_mode,
+                    top_n=args.external_top_n,
+                    evaluator=retrieval_evaluator,
+                    knowledge_source="external_fullwiki",
+                )
+
+            if crag_state == "correct":
+                selected_knowledge_chunks = internal_chunks
+            elif crag_state == "ambiguous":
+                selected_knowledge_chunks = combine_ambiguous_knowledge(internal_chunks, external_knowledge_chunks)
+            else:
+                selected_knowledge_chunks = external_knowledge_chunks
+            selected_evidence = internal_evidence + external_evidence
+            prompt = build_prompt(question, selected_knowledge_chunks)
             prediction = call_chat_completion(
                 messages=[
                     {"role": "system", "content": "You answer HotpotQA questions with the shortest possible answer only."},
@@ -399,12 +436,15 @@ def main() -> int:
                 "selected_topic_ids": selected_topic_ids,
                 "crag_state": crag_state,
                 "crag_confidence": crag_eval["confidence"],
+                "crag_flags": crag_eval["flags"],
                 "crag_chunk_scores": crag_eval["chunk_scores"],
                 "topic_retrieved_chunks": compact_chunks(topic_chunks),
-                "corrective_retrieved_chunks": compact_chunks(corrective_chunks),
-                "refined_chunks": compact_chunks(refined_chunks),
-                "refined_evidence": refined_evidence,
-                "retrieved_titles": [item.get("title") for item in refined_chunks],
+                "external_retrieved_chunks": compact_chunks(external_chunks),
+                "internal_knowledge_chunks": compact_chunks(internal_chunks),
+                "external_knowledge_chunks": compact_chunks(external_knowledge_chunks),
+                "selected_knowledge_chunks": compact_chunks(selected_knowledge_chunks),
+                "selected_evidence": selected_evidence,
+                "retrieved_titles": [item.get("title") for item in selected_knowledge_chunks],
                 "latency_sec": round(time.perf_counter() - started_at, 3),
             }
             if not args.no_save_prompts:

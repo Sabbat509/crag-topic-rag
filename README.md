@@ -11,20 +11,20 @@ Evaluation split: `hotpotqa/hotpot_qa`, `fullwiki`, validation.
 
 | Method | EM | Acc | F1 | G-Sem | Tok |
 |---|---:|---:|---:|---:|---:|
-| CRAG + Topic RAG | 10.61 | 13.75 | 13.50 | 32.31 | 1.30 |
+| Topic-Partitioned CRAG | 19.86 | 26.20 | 25.89 | 45.95 | 1.55 |
 
 LaTeX row:
 
 ```latex
-CRAG + Topic RAG & 10.61 & 13.75 & 13.50 & 32.31 & 1.30
+Topic-Partitioned CRAG & 19.86 & 26.20 & 25.89 & 45.95 & 1.55
 ```
 
-Final CRAG retrieval labels:
+Final CRAG branch counts:
 
 ```text
-correct: 6520
-ambiguous: 684
-incorrect: 201
+correct: 1735
+ambiguous: 3346
+incorrect: 2324
 ```
 
 The tracked summary file is `docs/results/summary.json`. Full `records.jsonl` and `predictions.csv` outputs are generated locally and ignored by git.
@@ -36,12 +36,27 @@ HotpotQA fullwiki question
   -> Gemma extracts retrieval knowledge points
   -> rank BERTopic topic profiles with all-MiniLM-L6-v2
   -> retrieve top-k chunks from selected topics only
-  -> CRAG retrieval evaluator labels retrieval as correct/ambiguous/incorrect
-  -> decompose chunks into sentences and recompose relevant evidence
-  -> if retrieval is weak, add corrective full-index retrieval
+  -> score query-passage pairs with a CRAG-style retrieval evaluator
+  -> convert scores to CRAG flags: 2=correct, 1=ambiguous, 0=incorrect
+  -> choose the CRAG branch:
+       correct: use internal topic-retrieved knowledge
+       ambiguous: combine internal knowledge + external fallback knowledge
+       incorrect: use external fallback knowledge
+  -> decompose/recompose knowledge strips following the CRAG repo modes
   -> Gemma generates the shortest answer
   -> compute EM, Acc, F1, G-Sem, Tok
 ```
+
+## CRAG Adaptation Notes
+
+This repository follows the public [`HuskyInSalt/CRAG`](https://github.com/HuskyInSalt/CRAG) control flow: retrieval evaluation, score-to-flag conversion, `correct` / `ambiguous` / `incorrect` branching, and decompose-then-recompose knowledge preparation.
+
+Two adaptations are used for HotpotQA:
+
+- Topic partitioning is added before retrieval, following the BERTopic-for-RAG setup.
+- The official CRAG web-search branch is replaced with fallback retrieval over the fixed HotpotQA fullwiki corpus. This keeps the experiment reproducible and avoids external search API drift.
+
+To run a web-search version closer to the original CRAG setup, a search provider key is needed, such as a `serper.dev` API key. The original CRAG repo also uses an OpenAI key during external knowledge preparation. Without those keys, this repository reports the reproducible fullwiki-fallback variant.
 
 ## Main Files
 
