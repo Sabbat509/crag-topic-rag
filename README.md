@@ -4,6 +4,31 @@ CRAG-style corrective retrieval for HotpotQA using the same BERTopic topic parti
 
 This repository is for the **CRAG + topic partitioning** experiment only. It does not include the Naive RAG evaluator or Naive RAG result artifacts.
 
+
+## Completed Result
+
+Evaluation split: `hotpotqa/hotpot_qa`, `fullwiki`, validation.
+
+| Method | EM | Acc | F1 | G-Sem | Tok |
+|---|---:|---:|---:|---:|---:|
+| CRAG + Topic RAG | 10.61 | 13.75 | 13.50 | 32.31 | 1.30 |
+
+LaTeX row:
+
+```latex
+CRAG + Topic RAG & 10.61 & 13.75 & 13.50 & 32.31 & 1.30
+```
+
+Final CRAG retrieval labels:
+
+```text
+correct: 6520
+ambiguous: 684
+incorrect: 201
+```
+
+The tracked summary file is `docs/results/summary.json`. Full `records.jsonl` and `predictions.csv` outputs are generated locally and ignored by git.
+
 ## Pipeline
 
 ```text
@@ -92,6 +117,7 @@ Build Kiraffe-style BERTopic topic partition artifacts:
   --doc-data result/intermediate/doc_data.pkl \
   --output-dir result/crag_topic_rag/topic_partition \
   --nr-topics 40 \
+  --backend auto \
   --device cuda:0
 ```
 

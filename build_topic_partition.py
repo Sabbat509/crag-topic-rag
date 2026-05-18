@@ -40,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-df", type=float, default=0.85)
     parser.add_argument("--max-features", type=int, default=10000)
     parser.add_argument("--top-n-words", type=int, default=12)
+    parser.add_argument("--backend", choices=["auto", "cuml", "cpu"], default="auto")
     parser.add_argument("--max-documents", type=int, help="Optional smoke/debug cap. Omit for full corpus.")
     parser.add_argument("--min-words", type=int, default=15)
     return parser.parse_args()
@@ -99,10 +100,26 @@ def main() -> int:
     args = parse_args()
     import numpy as np
     from bertopic import BERTopic
-    from hdbscan import HDBSCAN
     from sentence_transformers import SentenceTransformer
     from sklearn.feature_extraction.text import CountVectorizer
-    from umap import UMAP
+
+    backend = args.backend
+    if backend == "auto":
+        try:
+            from cuml.manifold import UMAP as UMAP
+            from cuml.cluster import HDBSCAN as HDBSCAN
+            backend = "cuml"
+        except Exception:
+            from umap import UMAP
+            from hdbscan import HDBSCAN
+            backend = "cpu"
+    elif backend == "cuml":
+        from cuml.manifold import UMAP as UMAP
+        from cuml.cluster import HDBSCAN as HDBSCAN
+    else:
+        from umap import UMAP
+        from hdbscan import HDBSCAN
+    print(f"BERTopic backend: {backend}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -135,10 +152,13 @@ def main() -> int:
         prediction_data=False,
     )
     vectorizer_model = CountVectorizer(
+        token_pattern=r"(?u)\b\w+\b",
         stop_words="english",
+        min_df=2,
         max_df=args.max_df,
         max_features=args.max_features,
         ngram_range=(1, 2),
+        lowercase=True,
     )
     topic_model = BERTopic(
         embedding_model=None,
@@ -183,6 +203,7 @@ def main() -> int:
             "max_df": args.max_df,
             "max_features": args.max_features,
             "top_n_words": args.top_n_words,
+            "backend": backend,
             "document_count_available": len(doc_data),
             "document_count_topic_modeled": len(docs),
             "topic_count_including_outlier": len(topic_counts),

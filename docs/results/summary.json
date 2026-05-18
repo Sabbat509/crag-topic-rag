@@ -1,0 +1,37 @@
+{
+  "count": 7405,
+  "config": {
+    "dataset": "hotpotqa/hotpot_qa",
+    "config": "fullwiki",
+    "split": "validation",
+    "start": 0,
+    "limit": null,
+    "index_dir": "result/crag_topic_rag/topic_index",
+    "topic_info_path": "result/crag_topic_rag/topic_partition/topic_info_40.csv",
+    "top_k": 5,
+    "fallback_top_k": 5,
+    "router_top_topics": 5,
+    "router_max_knowledge_points": 6,
+    "router_max_keywords": 12,
+    "topic_partitioning": true,
+    "crag": true,
+    "crag_min_correct_score": 0.36,
+    "crag_min_ambiguous_score": 0.28,
+    "crag_min_sentence_score": 0.24,
+    "crag_top_sentences": 8,
+    "model_name": "gemma2:2b",
+    "embedding_model": "all-MiniLM-L6-v2"
+  },
+  "metrics": {
+    "EM": 0.10614449696151249,
+    "Acc": 0.137474679270763,
+    "F1": 0.13503143610005972,
+    "G-Sem": 0.3231392661815762,
+    "Token": 1.2965563808237677
+  },
+  "crag": {
+    "correct": 6520,
+    "ambiguous": 684,
+    "incorrect": 201
+  }
+}
