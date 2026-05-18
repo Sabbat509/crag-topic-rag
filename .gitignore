@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# Large local data and generated artifacts
+data/
+logs/
+result/
+/root/.ollama/
