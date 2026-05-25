@@ -29,6 +29,16 @@ incorrect: 2324
 
 The tracked summary file is `docs/results/summary.json`. Full `records.jsonl` and `predictions.csv` outputs are generated locally and ignored by git.
 
+## Kiraffe 2026-05-22 Update
+
+Kiraffe's updated BERTopic hyperparameter search no longer recommends the old fixed 40-topic HotpotQA partition. The recommended HotpotQA setting is:
+
+```text
+uc=5, un=30, hcs=20, hms=20, max_df=0.95, ngram=(1,2), nr_topics=None
+```
+
+The reported natural topic count is approximately 252 topics from repeated staged samples. This repo keeps the original completed 40-topic result above for traceability, but new reruns should use the `topic_partition_kiraffe_20260522` / `topic_index_kiraffe_20260522` commands below.
+
 ## Pipeline
 
 ```text
@@ -125,13 +135,20 @@ Build the full vector chunk index:
   --device cuda:0
 ```
 
-Build Kiraffe-style BERTopic topic partition artifacts:
+Build Kiraffe-style BERTopic topic partition artifacts using the 2026-05-22 recommended HotpotQA settings (`uc=5`, `un=30`, `hcs=20`, `hms=20`, `max_df=0.95`, `ngram=(1,2)`). Kiraffe reports about 252 natural topics from staged sampling; this command lets HDBSCAN keep the natural topic count with `nr_topics=None`:
 
 ```bash
 .venv/bin/python build_topic_partition.py \
   --doc-data result/intermediate/doc_data.pkl \
-  --output-dir result/crag_topic_rag/topic_partition \
-  --nr-topics 40 \
+  --output-dir result/crag_topic_rag/topic_partition_kiraffe_20260522 \
+  --nr-topics none \
+  --umap-n-components 5 \
+  --umap-n-neighbors 30 \
+  --min-topic-size 20 \
+  --hdbscan-min-samples 20 \
+  --max-df 0.95 \
+  --ngram-range 1,2 \
+  --min-df 2 \
   --backend auto \
   --device cuda:0
 ```
@@ -141,19 +158,19 @@ Attach topic IDs to chunks:
 ```bash
 .venv/bin/python build_crag_topic_index.py \
   --base-index-dir result/base_index \
-  --topic-map result/crag_topic_rag/topic_partition/topic_article_map.jsonl \
-  --topic-info result/crag_topic_rag/topic_partition/topic_info_40.csv \
-  --output-dir result/crag_topic_rag/topic_index
+  --topic-map result/crag_topic_rag/topic_partition_kiraffe_20260522/topic_article_map.jsonl \
+  --topic-info result/crag_topic_rag/topic_partition_kiraffe_20260522/topic_info_none.csv \
+  --output-dir result/crag_topic_rag/topic_index_kiraffe_20260522
 ```
 
 Run CRAG + topic RAG evaluation:
 
 ```bash
 .venv/bin/python evaluate_crag_topic_rag.py \
-  --index-dir result/crag_topic_rag/topic_index \
-  --topic-info result/crag_topic_rag/topic_partition/topic_info_40.csv \
+  --index-dir result/crag_topic_rag/topic_index_kiraffe_20260522 \
+  --topic-info result/crag_topic_rag/topic_partition_kiraffe_20260522/topic_info_none.csv \
   --data-file data/hotpot_dev_fullwiki_v1.json \
-  --output-dir result/crag_topic_rag/hotpotqa_eval/reference_crag_topic_fullwiki \
+  --output-dir result/crag_topic_rag/hotpotqa_eval/reference_crag_topic_kiraffe_20260522_fullwiki \
   --device cuda:0 \
   --resume \
   --progress-every 25 \
